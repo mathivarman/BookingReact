@@ -5,7 +5,25 @@ const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ path: './.env' });
+
+// Set environment variables if not loaded from .env
+if (!process.env.DB_HOST) {
+  process.env.DB_HOST = 'localhost';
+  process.env.DB_USER = 'root';
+  process.env.DB_PASSWORD = 'root';
+  process.env.DB_NAME = 'apartment_booking';
+  process.env.PORT = '3001';
+  process.env.JWT_SECRET = 'your-super-secret-jwt-key-change-this-in-production';
+}
+
+// Debug environment variables
+console.log('Environment variables:');
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '***' : 'NOT SET');
+console.log('DB_NAME:', process.env.DB_NAME);
+console.log('PORT:', process.env.PORT);
 
 const app = express();
 const PORT = process.env.PORT || 3001;

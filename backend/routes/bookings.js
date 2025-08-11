@@ -102,7 +102,7 @@ router.get('/', [
        LEFT JOIN guests g ON b.guest_id = g.id 
        LEFT JOIN apartments a ON b.apartment_id = a.id 
        ${whereClause}
-       ORDER BY b.${sort} ${order.toUpperCase()}
+       ORDER BY b.${sort} ${order}
        LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
@@ -123,37 +123,7 @@ router.get('/', [
   }
 });
 
-// Get single booking
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const [bookings] = await db.promise().query(
-      `SELECT b.*, 
-              g.name as guest_name, g.phone as guest_phone, g.email as guest_email, 
-              g.address as guest_address, g.guest_type, g.place_or_country, 
-              g.introduced, g.introduced_by,
-              a.name as apartment_name, a.floor as apartment_floor
-       FROM bookings b 
-       LEFT JOIN guests g ON b.guest_id = g.id 
-       LEFT JOIN apartments a ON b.apartment_id = a.id 
-       WHERE b.id = ?`,
-      [id]
-    );
-
-    if (bookings.length === 0) {
-      return res.status(404).json({ message: 'Booking not found' });
-    }
-
-    res.json(bookings[0]);
-
-  } catch (error) {
-    console.error('Get booking error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-// Create new booking
+// Create booking
 router.post('/', [
   body('guest_name').notEmpty().trim(),
   body('guest_phone').notEmpty().trim(),
@@ -175,28 +145,6 @@ router.post('/', [
 
     const bookingData = req.body;
     const userId = req.user.id;
-
-    // Check for booking conflicts
-    const [conflicts] = await db.promise().query(
-      `SELECT id FROM bookings 
-       WHERE apartment_id = ? 
-       AND booking_status NOT IN ('cancelled')
-       AND (
-         (from_datetime <= ? AND to_datetime >= ?) OR
-         (from_datetime <= ? AND to_datetime >= ?) OR
-         (from_datetime >= ? AND to_datetime <= ?)
-       )`,
-      [
-        bookingData.apartment_id,
-        bookingData.from_datetime, bookingData.from_datetime,
-        bookingData.to_datetime, bookingData.to_datetime,
-        bookingData.from_datetime, bookingData.to_datetime
-      ]
-    );
-
-    if (conflicts.length > 0) {
-      return res.status(400).json({ message: 'Apartment is already booked for this time period' });
-    }
 
     // Create or get guest
     let guestId = bookingData.guest_id;
@@ -237,21 +185,33 @@ router.post('/', [
     );
 
     let baseRate = 0;
+    let multiplier = 1;
+    let subtotal = 0;
+    let tax = 0;
+    let grandTotal = 0;
+
     if (pricingRules.length > 0) {
       const rules = pricingRules[0];
       if (days <= 3) {
-        baseRate = rules.rate_1_3;
+        baseRate = rules.rate_1_3 || 0;
       } else if (days <= 6) {
-        baseRate = rules.rate_4_6;
+        baseRate = rules.rate_4_6 || 0;
       } else {
-        baseRate = rules.rate_7_plus;
+        baseRate = rules.rate_7_plus || 0;
       }
+      
+      multiplier = rules[`season_${bookingData.season || 'regular'}`] || 1;
+      subtotal = (baseRate * days * multiplier) - (bookingData.discount || 0);
+      tax = (subtotal * (rules.tax_percent || 0)) / 100;
+      grandTotal = subtotal + tax;
     }
 
-    const multiplier = pricingRules.length > 0 ? pricingRules[0][`season_${bookingData.season}`] : 1;
-    const subtotal = (baseRate * days * multiplier) - (bookingData.discount || 0);
-    const tax = (subtotal * (pricingRules.length > 0 ? pricingRules[0].tax_percent : 0)) / 100;
-    const grandTotal = subtotal + tax;
+    // Ensure all values are valid numbers
+    baseRate = isNaN(baseRate) ? 0 : baseRate;
+    multiplier = isNaN(multiplier) ? 1 : multiplier;
+    subtotal = isNaN(subtotal) ? 0 : subtotal;
+    tax = isNaN(tax) ? 0 : tax;
+    grandTotal = isNaN(grandTotal) ? 0 : grandTotal;
 
     // Create booking
     const [bookingResult] = await db.promise().query(
@@ -346,6 +306,19 @@ router.put('/:id', [
 
     const existingBooking = existingBookings[0];
 
+    // Calculate days and format datetime for MySQL first
+    const fromDate = new Date(bookingData.from_datetime);
+    const toDate = new Date(bookingData.to_datetime);
+    const days = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
+    
+    // Format datetime for MySQL (YYYY-MM-DD HH:MM:SS)
+    const formatDateTime = (date) => {
+      return date.toISOString().slice(0, 19).replace('T', ' ');
+    };
+    
+    const fromDateTime = formatDateTime(fromDate);
+    const toDateTime = formatDateTime(toDate);
+
     // Check for booking conflicts (excluding current booking)
     const [conflicts] = await db.promise().query(
       `SELECT id FROM bookings 
@@ -391,40 +364,39 @@ router.put('/:id', [
       );
     }
 
-    // Calculate days and format datetime for MySQL
-    const fromDate = new Date(bookingData.from_datetime);
-    const toDate = new Date(bookingData.to_datetime);
-    const days = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
-    
-    // Format datetime for MySQL (YYYY-MM-DD HH:MM:SS)
-    const formatDateTime = (date) => {
-      return date.toISOString().slice(0, 19).replace('T', ' ');
-    };
-    
-    const fromDateTime = formatDateTime(fromDate);
-    const toDateTime = formatDateTime(toDate);
-
     // Get pricing rules
     const [pricingRules] = await db.promise().query(
       'SELECT * FROM pricing_rules WHERE effective_date <= NOW() ORDER BY effective_date DESC LIMIT 1'
     );
 
     let baseRate = 0;
+    let multiplier = 1;
+    let subtotal = 0;
+    let tax = 0;
+    let grandTotal = 0;
+
     if (pricingRules.length > 0) {
       const rules = pricingRules[0];
       if (days <= 3) {
-        baseRate = rules.rate_1_3;
+        baseRate = rules.rate_1_3 || 0;
       } else if (days <= 6) {
-        baseRate = rules.rate_4_6;
+        baseRate = rules.rate_4_6 || 0;
       } else {
-        baseRate = rules.rate_7_plus;
+        baseRate = rules.rate_7_plus || 0;
       }
+      
+      multiplier = rules[`season_${bookingData.season || 'regular'}`] || 1;
+      subtotal = (baseRate * days * multiplier) - (bookingData.discount || 0);
+      tax = (subtotal * (rules.tax_percent || 0)) / 100;
+      grandTotal = subtotal + tax;
     }
 
-    const multiplier = pricingRules.length > 0 ? pricingRules[0][`season_${bookingData.season}`] : 1;
-    const subtotal = (baseRate * days * multiplier) - (bookingData.discount || 0);
-    const tax = (subtotal * (pricingRules.length > 0 ? pricingRules[0].tax_percent : 0)) / 100;
-    const grandTotal = subtotal + tax;
+    // Ensure all values are valid numbers
+    baseRate = isNaN(baseRate) ? 0 : baseRate;
+    multiplier = isNaN(multiplier) ? 1 : multiplier;
+    subtotal = isNaN(subtotal) ? 0 : subtotal;
+    tax = isNaN(tax) ? 0 : tax;
+    grandTotal = isNaN(grandTotal) ? 0 : grandTotal;
 
     // Update booking
     await db.promise().query(
@@ -508,28 +480,49 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// Get single booking
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [bookings] = await db.promise().query(
+      `SELECT b.*, 
+              g.name as guest_name, g.phone as guest_phone, g.email as guest_email, 
+              g.address as guest_address, g.guest_type, g.place_or_country, 
+              g.introduced, g.introduced_by,
+              a.name as apartment_name, a.floor as apartment_floor
+       FROM bookings b 
+       LEFT JOIN guests g ON b.guest_id = g.id 
+       LEFT JOIN apartments a ON b.apartment_id = a.id 
+       WHERE b.id = ?`,
+      [id]
+    );
+
+    if (bookings.length === 0) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    res.json(bookings[0]);
+
+  } catch (error) {
+    console.error('Get booking error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Send confirmation email
 router.post('/:id/send-email', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if booking exists and is confirmed
+    // Check if booking exists
     const [bookings] = await db.promise().query(
-      `SELECT b.*, g.email, g.name as guest_name 
-       FROM bookings b 
-       LEFT JOIN guests g ON b.guest_id = g.id 
-       WHERE b.id = ? AND b.booking_status = 'confirmed'`,
+      'SELECT * FROM bookings WHERE id = ?',
       [id]
     );
 
     if (bookings.length === 0) {
-      return res.status(404).json({ message: 'Confirmed booking not found' });
-    }
-
-    const booking = bookings[0];
-
-    if (!booking.email) {
-      return res.status(400).json({ message: 'Guest email not available' });
+      return res.status(404).json({ message: 'Booking not found' });
     }
 
     // Send email
@@ -539,9 +532,8 @@ router.post('/:id/send-email', async (req, res) => {
 
   } catch (error) {
     console.error('Send email error:', error);
-    res.status(500).json({ message: 'Failed to send confirmation email' });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
 module.exports = router;
-
