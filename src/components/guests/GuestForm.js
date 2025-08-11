@@ -23,18 +23,14 @@ const GuestForm = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
+    name: '',
     email: '',
     phone: '',
-    company: '',
     address: '',
-    city: '',
-    state: '',
-    zip_code: '',
-    country: '',
-    notes: '',
-    status: 'active'
+    guest_type: 'local',
+    place_or_country: '',
+    introduced: 'no',
+    introduced_by: ''
   });
 
   const fetchGuest = useCallback(async () => {
@@ -69,24 +65,30 @@ const GuestForm = () => {
   const validateForm = () => {
     const errors = [];
 
-    if (!formData.first_name.trim()) {
-      errors.push('First name is required');
-    }
-
-    if (!formData.last_name.trim()) {
-      errors.push('Last name is required');
-    }
-
-    if (!formData.email.trim()) {
-      errors.push('Email is required');
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.push('Please enter a valid email address');
+    if (!formData.name.trim()) {
+      errors.push('Name is required');
     }
 
     if (!formData.phone.trim()) {
       errors.push('Phone number is required');
     } else if (!/^\d{10}$/.test(formData.phone.replace(/\D/g, ''))) {
       errors.push('Please enter a valid 10-digit phone number');
+    }
+
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      errors.push('Please enter a valid email address');
+    }
+
+    if (formData.guest_type === 'local' && !formData.place_or_country.trim()) {
+      errors.push('Place/District is required for local guests');
+    }
+
+    if (formData.guest_type === 'foreign' && !formData.place_or_country.trim()) {
+      errors.push('Country is required for foreign guests');
+    }
+
+    if (formData.introduced === 'yes' && !formData.introduced_by.trim()) {
+      errors.push('Introduced By is required when Introduced is Yes');
     }
 
     return errors;
@@ -202,47 +204,29 @@ const GuestForm = () => {
                   Personal Information
                 </h5>
                 
-                <Row>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>First Name *</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="first_name"
-                        value={formData.first_name}
-                        onChange={handleInputChange}
-                        placeholder="Enter first name"
-                        required
-                      />
-                    </Form.Group>
-                  </Col>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>Last Name *</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="last_name"
-                        value={formData.last_name}
-                        onChange={handleInputChange}
-                        placeholder="Enter last name"
-                        required
-                      />
-                    </Form.Group>
-                  </Col>
-                </Row>
+                <Form.Group className="mb-3">
+                  <Form.Label>Full Name *</Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    placeholder="Enter full name"
+                    required
+                  />
+                </Form.Group>
 
                 <Form.Group className="mb-3">
                   <Form.Label>
                     <FaEnvelope className="me-2" />
-                    Email Address *
+                    Email Address
                   </Form.Label>
                   <Form.Control
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleInputChange}
-                    placeholder="Enter email address"
-                    required
+                    placeholder="Enter email address (optional)"
                   />
                 </Form.Group>
 
@@ -263,120 +247,79 @@ const GuestForm = () => {
 
                 <Form.Group className="mb-3">
                   <Form.Label>
-                    <FaBuilding className="me-2" />
-                    Company
+                    <FaMapMarkerAlt className="me-2" />
+                    Address
                   </Form.Label>
                   <Form.Control
-                    type="text"
-                    name="company"
-                    value={formData.company}
-                    onChange={handleInputChange}
-                    placeholder="Enter company name (optional)"
-                  />
-                </Form.Group>
-              </Col>
-
-              {/* Address Information */}
-              <Col md={6}>
-                <h5 className="mb-3">
-                  <FaMapMarkerAlt className="me-2" />
-                  Address Information
-                </h5>
-
-                <Form.Group className="mb-3">
-                  <Form.Label>Address</Form.Label>
-                  <Form.Control
-                    type="text"
+                    as="textarea"
+                    rows={2}
                     name="address"
                     value={formData.address}
                     onChange={handleInputChange}
-                    placeholder="Enter street address"
+                    placeholder="Enter address (optional)"
                   />
-                </Form.Group>
-
-                <Row>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>City</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="city"
-                        value={formData.city}
-                        onChange={handleInputChange}
-                        placeholder="Enter city"
-                      />
-                    </Form.Group>
-                  </Col>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>State/Province</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="state"
-                        value={formData.state}
-                        onChange={handleInputChange}
-                        placeholder="Enter state"
-                      />
-                    </Form.Group>
-                  </Col>
-                </Row>
-
-                <Row>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>ZIP/Postal Code</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="zip_code"
-                        value={formData.zip_code}
-                        onChange={handleInputChange}
-                        placeholder="Enter ZIP code"
-                      />
-                    </Form.Group>
-                  </Col>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>Country</Form.Label>
-                      <Form.Control
-                        type="text"
-                        name="country"
-                        value={formData.country}
-                        onChange={handleInputChange}
-                        placeholder="Enter country"
-                      />
-                    </Form.Group>
-                  </Col>
-                </Row>
-
-                <Form.Group className="mb-3">
-                  <Form.Label>Status</Form.Label>
-                  <Form.Select
-                    name="status"
-                    value={formData.status}
-                    onChange={handleInputChange}
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="blocked">Blocked</option>
-                  </Form.Select>
                 </Form.Group>
               </Col>
-            </Row>
 
-            {/* Additional Information */}
-            <Row>
-              <Col>
+              {/* Guest Details */}
+              <Col md={6}>
+                <h5 className="mb-3">
+                  <FaUser className="me-2" />
+                  Guest Details
+                </h5>
+
                 <Form.Group className="mb-3">
-                  <Form.Label>Notes</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    name="notes"
-                    value={formData.notes}
+                  <Form.Label>Guest Type *</Form.Label>
+                  <Form.Select
+                    name="guest_type"
+                    value={formData.guest_type}
                     onChange={handleInputChange}
-                    placeholder="Enter any additional notes about the guest"
+                    required
+                  >
+                    <option value="local">Local</option>
+                    <option value="foreign">Foreign</option>
+                  </Form.Select>
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                  <Form.Label>
+                    {formData.guest_type === 'local' ? 'Place/District' : 'Country'} *
+                  </Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="place_or_country"
+                    value={formData.place_or_country}
+                    onChange={handleInputChange}
+                    placeholder={formData.guest_type === 'local' ? 'Enter place/district' : 'Enter country'}
+                    required
                   />
                 </Form.Group>
+
+                <Form.Group className="mb-3">
+                  <Form.Label>Introduced</Form.Label>
+                  <Form.Select
+                    name="introduced"
+                    value={formData.introduced}
+                    onChange={handleInputChange}
+                  >
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </Form.Select>
+                </Form.Group>
+
+                {formData.introduced === 'yes' && (
+                  <Form.Group className="mb-3">
+                    <Form.Label>Introduced By *</Form.Label>
+                    <Form.Control
+                      type="text"
+                      name="introduced_by"
+                      value={formData.introduced_by}
+                      onChange={handleInputChange}
+                      placeholder="Enter name/contact of introducer"
+                      required
+                    />
+                  </Form.Group>
+                )}
               </Col>
             </Row>
 

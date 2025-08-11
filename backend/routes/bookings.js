@@ -218,10 +218,18 @@ router.post('/', [
       guestId = guestResult.insertId;
     }
 
-    // Calculate days
+    // Calculate days and format datetime for MySQL
     const fromDate = new Date(bookingData.from_datetime);
     const toDate = new Date(bookingData.to_datetime);
     const days = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
+    
+    // Format datetime for MySQL (YYYY-MM-DD HH:MM:SS)
+    const formatDateTime = (date) => {
+      return date.toISOString().slice(0, 19).replace('T', ' ');
+    };
+    
+    const fromDateTime = formatDateTime(fromDate);
+    const toDateTime = formatDateTime(toDate);
 
     // Get pricing rules
     const [pricingRules] = await db.promise().query(
@@ -258,8 +266,8 @@ router.post('/', [
         bookingData.apartment_id,
         bookingData.floor || null,
         bookingData.unit_no || null,
-        bookingData.from_datetime,
-        bookingData.to_datetime,
+        fromDateTime,
+        toDateTime,
         days,
         bookingData.season || 'regular',
         baseRate,
@@ -352,9 +360,9 @@ router.put('/:id', [
       [
         bookingData.apartment_id,
         id,
-        bookingData.from_datetime, bookingData.from_datetime,
-        bookingData.to_datetime, bookingData.to_datetime,
-        bookingData.from_datetime, bookingData.to_datetime
+        fromDateTime, fromDateTime,
+        toDateTime, toDateTime,
+        fromDateTime, toDateTime
       ]
     );
 
@@ -383,10 +391,18 @@ router.put('/:id', [
       );
     }
 
-    // Calculate days
+    // Calculate days and format datetime for MySQL
     const fromDate = new Date(bookingData.from_datetime);
     const toDate = new Date(bookingData.to_datetime);
     const days = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24));
+    
+    // Format datetime for MySQL (YYYY-MM-DD HH:MM:SS)
+    const formatDateTime = (date) => {
+      return date.toISOString().slice(0, 19).replace('T', ' ');
+    };
+    
+    const fromDateTime = formatDateTime(fromDate);
+    const toDateTime = formatDateTime(toDate);
 
     // Get pricing rules
     const [pricingRules] = await db.promise().query(
@@ -421,8 +437,8 @@ router.put('/:id', [
         bookingData.apartment_id,
         bookingData.floor || null,
         bookingData.unit_no || null,
-        bookingData.from_datetime,
-        bookingData.to_datetime,
+        fromDateTime,
+        toDateTime,
         days,
         bookingData.season || 'regular',
         baseRate,
