@@ -40,7 +40,7 @@ router.get('/', [
             AVG(grand_total) as average_booking_value
            FROM bookings 
            ${revenueWhereClause}
-           GROUP BY YEAR(created_at), MONTH(created_at)
+           GROUP BY DATE_FORMAT(created_at, "%Y-%m")
            ORDER BY period DESC`,
           revenueParams
         );
@@ -86,7 +86,7 @@ router.get('/', [
             ROUND((COUNT(DISTINCT apartment_id) / ?) * 100, 2) as occupancy_rate
            FROM bookings 
            ${occupancyWhereClause}
-           GROUP BY YEAR(from_datetime), MONTH(from_datetime)
+           GROUP BY DATE_FORMAT(from_datetime, "%Y-%m")
            ORDER BY period DESC`,
           [totalApartments[0].total, ...occupancyParams]
         );
