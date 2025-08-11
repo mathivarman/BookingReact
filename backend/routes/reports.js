@@ -3,6 +3,177 @@ const { query } = require('express-validator');
 const db = require('../config/database');
 const router = express.Router();
 
+// Main reports endpoint
+router.get('/', [
+  query('type').isIn(['revenue', 'occupancy', 'arrivals-departures', 'apartment-performance', 'payment-analytics']),
+  query('start_date').optional().isDate(),
+  query('end_date').optional().isDate()
+], async (req, res) => {
+  try {
+    const { type, start_date, end_date } = req.query;
+
+    let reportData = {};
+
+    switch (type) {
+      case 'revenue':
+        // Get revenue data
+        let revenueWhereConditions = ['payment_status = "paid"'];
+        let revenueParams = [];
+
+        if (start_date) {
+          revenueWhereConditions.push('DATE(created_at) >= ?');
+          revenueParams.push(start_date);
+        }
+
+        if (end_date) {
+          revenueWhereConditions.push('DATE(created_at) <= ?');
+          revenueParams.push(end_date);
+        }
+
+        const revenueWhereClause = `WHERE ${revenueWhereConditions.join(' AND ')}`;
+
+        const [revenue] = await db.promise().query(
+          `SELECT 
+            DATE_FORMAT(created_at, "%Y-%m") as period,
+            SUM(grand_total) as total_revenue,
+            COUNT(*) as total_bookings,
+            AVG(grand_total) as average_booking_value
+           FROM bookings 
+           ${revenueWhereClause}
+           GROUP BY YEAR(created_at), MONTH(created_at)
+           ORDER BY period DESC`,
+          revenueParams
+        );
+
+        const totals = revenue.reduce((acc, row) => {
+          acc.totalRevenue += parseFloat(row.total_revenue || 0);
+          acc.totalBookings += parseInt(row.total_bookings || 0);
+          return acc;
+        }, { totalRevenue: 0, totalBookings: 0 });
+
+        reportData = {
+          revenue,
+          totals,
+          filters: { start_date, end_date }
+        };
+        break;
+
+      case 'occupancy':
+        // Get occupancy data
+        const [totalApartments] = await db.promise().query(
+          'SELECT COUNT(*) as total FROM apartments WHERE is_active = 1'
+        );
+
+        let occupancyWhereConditions = ['booking_status IN ("confirmed", "checked-in")'];
+        let occupancyParams = [];
+
+        if (start_date) {
+          occupancyWhereConditions.push('DATE(from_datetime) >= ?');
+          occupancyParams.push(start_date);
+        }
+
+        if (end_date) {
+          occupancyWhereConditions.push('DATE(to_datetime) <= ?');
+          occupancyParams.push(end_date);
+        }
+
+        const occupancyWhereClause = `WHERE ${occupancyWhereConditions.join(' AND ')}`;
+
+        const [occupancy] = await db.promise().query(
+          `SELECT 
+            DATE_FORMAT(from_datetime, "%Y-%m") as period,
+            COUNT(DISTINCT apartment_id) as occupied_apartments,
+            ROUND((COUNT(DISTINCT apartment_id) / ?) * 100, 2) as occupancy_rate
+           FROM bookings 
+           ${occupancyWhereClause}
+           GROUP BY YEAR(from_datetime), MONTH(from_datetime)
+           ORDER BY period DESC`,
+          [totalApartments[0].total, ...occupancyParams]
+        );
+
+        reportData = {
+          occupancy,
+          totalApartments: totalApartments[0].total,
+          filters: { start_date, end_date }
+        };
+        break;
+
+      case 'arrivals-departures':
+        // Get arrivals and departures data
+        let arrivalsWhereConditions = [];
+        let arrivalsParams = [];
+
+        if (start_date) {
+          arrivalsWhereConditions.push('DATE(from_datetime) >= ?');
+          arrivalsParams.push(start_date);
+        }
+
+        if (end_date) {
+          arrivalsWhereConditions.push('DATE(from_datetime) <= ?');
+          arrivalsParams.push(end_date);
+        }
+
+        const arrivalsWhereClause = arrivalsWhereConditions.length > 0 ? `WHERE ${arrivalsWhereConditions.join(' AND ')}` : '';
+
+        const [arrivals] = await db.promise().query(
+          `SELECT 
+            DATE(from_datetime) as date,
+            COUNT(*) as arrivals,
+            SUM(grand_total) as revenue
+           FROM bookings 
+           ${arrivalsWhereClause}
+           WHERE booking_status IN ("confirmed", "checked-in")
+           GROUP BY DATE(from_datetime)
+           ORDER BY date DESC`,
+          arrivalsParams
+        );
+
+        let departuresWhereConditions = [];
+        let departuresParams = [];
+
+        if (start_date) {
+          departuresWhereConditions.push('DATE(to_datetime) >= ?');
+          departuresParams.push(start_date);
+        }
+
+        if (end_date) {
+          departuresWhereConditions.push('DATE(to_datetime) <= ?');
+          departuresParams.push(end_date);
+        }
+
+        const departuresWhereClause = departuresWhereConditions.length > 0 ? `WHERE ${departuresWhereConditions.join(' AND ')}` : '';
+
+        const [departures] = await db.promise().query(
+          `SELECT 
+            DATE(to_datetime) as date,
+            COUNT(*) as departures
+           FROM bookings 
+           ${departuresWhereClause}
+           WHERE booking_status IN ("confirmed", "checked-in", "checked-out")
+           GROUP BY DATE(to_datetime)
+           ORDER BY date DESC`,
+          departuresParams
+        );
+
+        reportData = {
+          arrivals,
+          departures,
+          filters: { start_date, end_date }
+        };
+        break;
+
+      default:
+        return res.status(400).json({ message: 'Invalid report type' });
+    }
+
+    res.json(reportData);
+
+  } catch (error) {
+    console.error('Get report error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Get revenue report
 router.get('/revenue', [
   query('startDate').optional().isDate(),
@@ -418,6 +589,45 @@ router.get('/payment-analytics', [
 
   } catch (error) {
     console.error('Get payment analytics report error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Export report endpoint
+router.get('/export', [
+  query('type').isIn(['revenue', 'occupancy', 'arrivals-departures', 'apartment-performance', 'payment-analytics']),
+  query('start_date').optional().isDate(),
+  query('end_date').optional().isDate(),
+  query('format').optional().isIn(['pdf', 'csv', 'excel'])
+], async (req, res) => {
+  try {
+    const { type, start_date, end_date, format = 'csv' } = req.query;
+
+    // For now, return a simple CSV format
+    // In a real implementation, you would use libraries like pdfkit for PDF or exceljs for Excel
+    
+    let csvContent = '';
+    
+    switch (type) {
+      case 'revenue':
+        csvContent = 'Period,Total Revenue,Total Bookings,Average Booking Value\n';
+        csvContent += '2025-08,0,0,0\n'; // Placeholder data
+        break;
+      case 'occupancy':
+        csvContent = 'Period,Occupied Apartments,Total Apartments,Occupancy Rate\n';
+        csvContent += '2025-08,0,6,0\n'; // Placeholder data
+        break;
+      default:
+        csvContent = 'Date,Value\n';
+        csvContent += '2025-08-01,0\n'; // Placeholder data
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${type}-report-${start_date}-to-${end_date}.csv"`);
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Export report error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
